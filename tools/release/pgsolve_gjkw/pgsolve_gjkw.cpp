@@ -16,12 +16,13 @@
 #include "pgsolver_io.h"
 #include "utilities.h"
 #include "mcrl2/lts/lts_algorithm.h"
+#include "liblts_kripke.cpp"
 
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
 using namespace mcrl2::lts; // For reduce() function.
-using namespace mcrl2::log;
+using namespace mcrl2::log; // Logging.
 
 namespace mcrl2 {
 
@@ -35,9 +36,14 @@ class pg_convert
     lts::lts_fsm_t m_lts;
 
   public:
-  pg_convert(parity_game_t& pg)
+  pg_convert(parity_game_t pg)
     : m_pg(pg)
     {}
+
+  parity_game_t get_parity_game()
+  {
+    return m_pg;
+  }
 
   void convert_pg()
   /*  Convert reduced Kripke structure in lts_fsm_t lts to a Parity Game in 
@@ -68,6 +74,7 @@ class pg_convert
       boost::add_edge(u, v, m_pg);
     }
   }
+  
   void convert_ks()
   /* Convert Parity Game to a Kripke structure contained in lts_fsm_t. */
   {
@@ -87,24 +94,27 @@ class pg_convert
       vertex_state_map[*i] = state;
     }
     // Set an initial state.
-    m_lts.set_initial_state(0);
+    size_t label = m_lts.add_action(action_label_string(" "));
     // Loop over all edges in the graph and add transitions to our lts
     boost::graph_traits<parity_game_t>::edge_iterator e, m;
     for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
     {
       size_t s = vertex_state_map[source(*e, m_pg)];
       size_t t = vertex_state_map[target(*e, m_pg)];
-      size_t l = 0; 
-      m_lts.add_transition(transition(s,l,t));
+      m_lts.add_transition(transition(s,label,t));
     }
   }
 
-  void run()
+  void run(std::string file)
   {
+    std::ofstream m_ofstream;
     convert_ks();
-    printf("Converting Kripke Structure back to PG.\n");
+    // Call algorithm on m_lts.
+
+    liblts_kripke<lts_fsm_t>(m_lts, true, false);
     convert_pg();
-    printf("Converting LTS back to a Kripke Structure. \n");
+    std::ostream& os = open_output(file, m_ofstream);
+    print_pgsolver(m_pg, os);
   }
 };
 
@@ -137,15 +147,13 @@ class pgsolve_tool: public input_output_tool
     bool run()
     {
       std::istream& is = open_input(input_filename(), m_ifstream);
-      std::ostream& os = open_output(output_filename(), m_ofstream);
       // Main program flow
       parity_game_t pg;
       mCRL2log(verbose) << "Loading PG from input file..." << std::endl;
       parse_pgsolver(pg, is, timer());
-      mcrl2::pg_convert(pg).run(output_filename());
+      mcrl2::pg_convert c = mcrl2::pg_convert(pg);
+      c.run(output_filename());
       mCRL2log(verbose) << "Saving output to file..." << std::endl;
-      print_pgsolver(pg, os);
-      
       mCRL2log(verbose) << "Terminating..." << std::endl;
       return true;
     }

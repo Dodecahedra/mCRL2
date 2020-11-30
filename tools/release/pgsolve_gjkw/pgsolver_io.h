@@ -100,7 +100,6 @@ class pgsolver_parser
         size_t n;
         char c;
         s >> n;
-        m_pg = ParityGame(n+1);
         s >> c;
         if (c != ';')
           parse_error(s, "Invalid header, expected semicolon.");
