@@ -1427,14 +1427,19 @@ bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool const branching,
     inert_out_per_block(1, 0),
     states_per_block(1, l.num_states()),
     nr_of_nonbottom_states(0)
+{}
+
+template<class LTS_TYPE>
+inline void bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
+init_kripke(bool const branching, bool const preserve_divergence)
 {
-    // log::mcrl2_logger::set_reporting_level(log::debug);
+  // log::mcrl2_logger::set_reporting_level(log::debug);
 
     mCRL2log(log::verbose) << "O(m log n) "
                     << (preserve_divergence ? "Divergence preserving b" : "B")
                     << (branching ? "ranching b" : "")
-                    << "isimulation partitioner created for " << l.num_states()
-                    << " states and " << l.num_transitions()
+                    << "isimulation partitioner created for " << aut.num_states()
+                    << " states and " << aut.num_transitions()
                     << " transitions [GJKW 2017]\n";
     // Iterate over the transitions and collect new states
     for (const transition& t: aut.get_transitions())
