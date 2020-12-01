@@ -3,3 +3,7 @@ build/SourceVersion
 
 # Compiled byte-code for Python.
 *.pyc
+todo.md
+.vscode/launch.json
+.vscode/settings.json
+.vscode/tasks.json
