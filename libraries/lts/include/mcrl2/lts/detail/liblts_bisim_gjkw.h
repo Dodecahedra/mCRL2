@@ -1705,6 +1705,8 @@ class bisim_partitioner_gjkw_initialise_helper
     bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool branching,
                                                      bool preserve_divergence);
 
+    void init_kripke(bool branching, bool preserve_divergence);
+
     /// initialise the state in part_st and the transitions in part_tr
     void init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                                      bool branching, bool preserve_divergence);
@@ -1754,8 +1756,6 @@ class bisim_partitioner_gjkw
         part_st(init_helper.get_nr_of_states()),
         part_tr(init_helper.get_nr_of_transitions())
     {                                                                           assert(branching || !preserve_divergence);
-        create_initial_partition_gjkw(branching, preserve_divergence);
-        refine_partition_until_it_becomes_stable_gjkw();
     }
     ~bisim_partitioner_gjkw()
     {
@@ -1789,7 +1789,7 @@ class bisim_partitioner_gjkw
         return part_st.block(s) == part_st.block(t);
     }
 
-  private:
+  protected:
 
     /*-------- dbStutteringEquivalence -- Algorithm 2 of [GJKW 2017] --------*/
 
