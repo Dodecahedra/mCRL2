@@ -110,11 +110,12 @@ class pg_convert
     std::ofstream m_ofstream;
     convert_ks();
     // Call algorithm on m_lts.
-
-    liblts_kripke<lts_fsm_t>(m_lts, true, false);
+    mCRL2log(verbose) << "Calling lts!" << std::endl;
+    liblts_kripke<lts_fsm_t> d(m_lts, true, false);
     convert_pg();
     std::ostream& os = open_output(file, m_ofstream);
     print_pgsolver(m_pg, os);
+    mCRL2log(verbose) << "Printed file" << std::endl;
   }
 };
 
@@ -152,9 +153,9 @@ class pgsolve_tool: public input_output_tool
       mCRL2log(verbose) << "Loading PG from input file..." << std::endl;
       parse_pgsolver(pg, is, timer());
       mcrl2::pg_convert c = mcrl2::pg_convert(pg);
+      mCRL2log(verbose) << "Created object" << std::endl;
       c.run(output_filename());
-      mCRL2log(verbose) << "Saving output to file..." << std::endl;
-      mCRL2log(verbose) << "Terminating..." << std::endl;
+      mCRL2log(verbose) << "Terminating" << std::endl;
       return true;
     }
 };
