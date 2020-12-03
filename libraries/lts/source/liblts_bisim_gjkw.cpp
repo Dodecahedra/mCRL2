@@ -1603,88 +1603,28 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
         }
     }
 
-    // initialise transitions (and finalise extra Kripke states)
+    // initialise transitions
     for (const transition& t: aut.get_transitions())
     {
-        if (!branching || !aut.is_tau(aut.apply_hidden_label_map(t.label())) ||
-                                   (preserve_divergence && t.from() == t.to()))
-        {
-            // take transition through an extra intermediary state
-            Key const k(aut.apply_hidden_label_map(t.label()), t.to());
-            state_type const extra_state = extra_kripke_states[k];
-            if (0 != noninert_out_per_state[extra_state])
-            {
-                state_type const extra_block =
-                       action_block_map[aut.apply_hidden_label_map(t.label())];
-                // now initialise extra_state correctly
-                part_st.state_info[extra_state].block = blocks[extra_block];    assert(0 != states_per_block[extra_block]);
-                --states_per_block[extra_block];
-                part_st.state_info[extra_state].pos = blocks[extra_block]->
-                                       begin() + states_per_block[extra_block];
-                *part_st.state_info[extra_state].pos =
-                                              &part_st.state_info[extra_state];
-                // part_st.state_info[extra_state].notblue = 0;
+      /* inert transition from t.from() to t.to()                      */ assert(0 != inert_in_per_state[t.to()]);
+      --inert_in_per_state[t.to()];
+      pred_iter_t const t_pred =
+                          part_st.state_info[t.to()].inert_pred_begin() +
+                                              inert_in_per_state[t.to()]; assert(0 != inert_out_per_state[t.from()]);
+      --inert_out_per_state[t.from()];
+      succ_iter_t const t_succ =
+                          part_st.state_info[t.from()].inert_succ_begin() +
+                                              inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[0]);
+      --inert_out_per_block[0];
+      B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() +
+                                                  inert_out_per_block[0];
 
-                // state extra_state has exactly one outgoing transition,
-                // namely a noninert transition to to t.to().  It has to be
-                /* initialised now.                                          */ assert(0 != noninert_in_per_state[t.to()]);
-                --noninert_in_per_state[t.to()];
-                pred_iter_t const t_pred =
-                             part_st.state_info[t.to()].noninert_pred_begin() +
-                                                 noninert_in_per_state[t.to()];
-                --noninert_out_per_state[extra_state];                          assert(0 == noninert_out_per_state[extra_state]);
-                succ_iter_t const t_succ =
-                                  part_st.state_info[extra_state].succ_begin(); assert(0 != noninert_out_per_block[extra_block]);
-                B_to_C_iter_t const t_B_to_C =
-                                         blocks[extra_block]->inert_begin() -
-                                         noninert_out_per_block[extra_block]--;
-                t_pred->source = &part_st.state_info[extra_state];
-                t_pred->succ = t_succ;
-                t_succ->target = &part_st.state_info[t.to()];
-                t_succ->B_to_C = t_B_to_C;
-                // t_B_to_C->B_to_C_slice = (already initialised);
-                t_B_to_C->pred = t_pred;
-            }
-            /* noninert transition from t.from() to extra_state              */ assert(0 != noninert_in_per_state[extra_state]);
-            --noninert_in_per_state[extra_state];
-            pred_iter_t const t_pred =
-                        part_st.state_info[extra_state].noninert_pred_begin() +
-                                            noninert_in_per_state[extra_state]; assert(0 != noninert_out_per_state[t.from()]);
-            --noninert_out_per_state[t.from()];
-            succ_iter_t const t_succ=part_st.state_info[t.from()].succ_begin()+
-                                              noninert_out_per_state[t.from()]; assert(0 != noninert_out_per_block[0]);
-            B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() -
-                                                   noninert_out_per_block[0]--;
-
-            t_pred->source = &part_st.state_info[t.from()];
-            t_pred->succ = t_succ;
-            t_succ->target = &part_st.state_info[extra_state];
-            t_succ->B_to_C = t_B_to_C;
-            // t_B_to_C->B_to_C_slice = (already initialised);
-            t_B_to_C->pred = t_pred;
-        }
-        else
-        {
-            /* inert transition from t.from() to t.to()                      */ assert(0 != inert_in_per_state[t.to()]);
-            --inert_in_per_state[t.to()];
-            pred_iter_t const t_pred =
-                                part_st.state_info[t.to()].inert_pred_begin() +
-                                                    inert_in_per_state[t.to()]; assert(0 != inert_out_per_state[t.from()]);
-            --inert_out_per_state[t.from()];
-            succ_iter_t const t_succ =
-                              part_st.state_info[t.from()].inert_succ_begin() +
-                                                 inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[0]);
-            --inert_out_per_block[0];
-            B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() +
-                                                        inert_out_per_block[0];
-
-            t_pred->source = &part_st.state_info[t.from()];
-            t_pred->succ = t_succ;
-            t_succ->target = &part_st.state_info[t.to()];
-            t_succ->B_to_C = t_B_to_C;
-            // t_B_to_C->B_to_C_slice = (already initialised);
-            t_B_to_C->pred = t_pred;
-        }
+      t_pred->source = &part_st.state_info[t.from()];
+      t_pred->succ = t_succ;
+      t_succ->target = &part_st.state_info[t.to()];
+      t_succ->B_to_C = t_B_to_C;
+      // t_B_to_C->B_to_C_slice = (already initialised);
+      t_B_to_C->pred = t_pred;
     }
     noninert_out_per_state.clear(); inert_out_per_state.clear();
     noninert_in_per_state.clear();  inert_in_per_state.clear();

@@ -68,6 +68,18 @@ struct is_even_vtx
 };
 
 inline
+size_t get_max_priority(const parity_game_t& pg)
+{
+  size_t max_priority = 0;
+  boost::graph_traits< parity_game_t >::vertex_iterator i, end;
+  for(boost::tie(i, end) = vertices(pg); i != end; ++i)
+  {
+    max_priority = std::max(max_priority, pg[*i].prio);
+  }
+  return max_priority;
+}
+
+inline
 size_t num_even_vertices(const parity_game_t& pg)
 {
   boost::graph_traits< parity_game_t >::vertex_iterator i, end;

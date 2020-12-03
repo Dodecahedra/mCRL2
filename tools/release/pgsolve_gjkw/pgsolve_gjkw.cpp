@@ -80,6 +80,20 @@ class pg_convert
   {
     // LTS in which we save the Kripke structure
     std::map<size_t, size_t> vertex_state_map;
+    std::map<size_t, size_t> mp;
+    std::map<size_t, size_t> mp1;
+    m_lts.add_process_parameter("Parity", "Nat");
+    m_lts.add_process_parameter("Priority", "Nat");
+    size_t zero = m_lts.add_state_element_value(0, "0");
+    size_t one = m_lts.add_state_element_value(0, "1");
+    mp1[0] = zero;
+    mp1[1] = one;
+    unsigned int max_priority = 8;
+    for(unsigned int i = 0; i != max_priority; ++i)
+    {
+      size_t l = m_lts.add_state_element_value(1, std::to_string(i));
+      mp[i] = l;
+    }
 
     boost::graph_traits<parity_game_t >::vertex_iterator i, n;
     // We loop over vertices and add new states to the lts
@@ -93,7 +107,7 @@ class pg_convert
       // Add the (vertex,state) pair to map
       vertex_state_map[*i] = state;
     }
-    // Set an initial state.
+    m_lts.set_initial_state(0);
     size_t label = m_lts.add_action(action_label_string(" "));
     // Loop over all edges in the graph and add transitions to our lts
     boost::graph_traits<parity_game_t>::edge_iterator e, m;
@@ -108,14 +122,18 @@ class pg_convert
   void run(std::string file)
   {
     std::ofstream m_ofstream;
+    mCRL2log(verbose) << "Start of convert!" << std::endl;
     convert_ks();
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts!" << std::endl;
-    liblts_kripke<lts_fsm_t> d(m_lts, true, false);
-    convert_pg();
-    std::ostream& os = open_output(file, m_ofstream);
-    print_pgsolver(m_pg, os);
-    mCRL2log(verbose) << "Printed file" << std::endl;
+    liblts_kripke<lts_fsm_t> d(m_lts, true, true);
+    // mCRL2log(verbose) << "Replacing LTS!" << std::endl;
+    d.replace_transition_system(true, true);
+    m_lts.save(file);
+    // convert_pg();
+    // std::ostream& os = open_output(file, m_ofstream);
+    // print_pgsolver(m_pg, os);
+    // mCRL2log(verbose) << "Printed file" << std::endl;
   }
 };
 
@@ -153,7 +171,6 @@ class pgsolve_tool: public input_output_tool
       mCRL2log(verbose) << "Loading PG from input file..." << std::endl;
       parse_pgsolver(pg, is, timer());
       mcrl2::pg_convert c = mcrl2::pg_convert(pg);
-      mCRL2log(verbose) << "Created object" << std::endl;
       c.run(output_filename());
       mCRL2log(verbose) << "Terminating" << std::endl;
       return true;
