@@ -37,6 +37,7 @@ struct pg_label_t
   size_t node_id; ///< The identity of the vertex
   priority_t prio; ///< The vertex priority
   player_t player; ///< The owner of the vertex
+  bool unused = false;///< Flag if node is unused after shrinking graph
   /// @brief Comparison to make pg_label_t a valid mapping index.
   bool operator<(const pg_label_t& other) const
   {

@@ -14,10 +14,12 @@
 #include "mcrl2/utilities/input_output_tool.h"
 #include "pg.h"
 #include "pgsolver_io.h"
+#include "liblts_bisim_gjkw_kripke.h"
 #include "utilities.h"
 #include "mcrl2/lts/lts_algorithm.h"
-#include "liblts_kripke.cpp"
+#include "scc.h"
 
+#include <boost/graph/strong_components.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
@@ -30,9 +32,9 @@ class pg_convert
 {
 
   protected:
-    /** Storing bes from Parity Game */
+    /** Storing Parity Game */
     parity_game_t m_pg;
-    /** Reduced Kripke structure in lts */
+    /** Reduced Kripke structure in LTS */
     lts::lts_fsm_t m_lts;
 
   public:
@@ -45,7 +47,7 @@ class pg_convert
     return m_pg;
   }
 
-  void convert_pg()
+  void convert_ks_to_pg()
   /*  Convert reduced Kripke structure in lts_fsm_t lts to a Parity Game in 
       parity_game_t format. */
   {
@@ -74,8 +76,81 @@ class pg_convert
       boost::add_edge(u, v, m_pg);
     }
   }
+
+  void reduce_pg_scc(std::string file)
+  /* Reduce Parity Game graph to remove Strongly Connected Components. */
+  {
+    typedef typename boost::graph_traits<parity_game_t>::vertices_size_type vertex_size_t;
+    parity_game_t* reduced = new parity_game_t(m_pg);
+    boost::graph_traits<parity_game_t>::edge_iterator e, m;
+    /* We (deep) copied the graph and go over all edges and remove any edge for which
+      the source and target label are not the same (to ensure our SCC have same label)*/
+    for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
+    {
+      vertex_size_t s = source(*e, m_pg);
+      vertex_size_t t = target(*e, m_pg);
+      if(m_pg[s].prio != m_pg[t].prio || m_pg[s].player != m_pg[t].player)
+      {
+        // Since we aren't removing edges from m_pg, this is safe.
+        boost::remove_edge(s,t,*reduced);
+      }
+    }
+    /* We compute the strong components and go over the edges in our original graph.
+      We merge all vertices that are in the same SCC. */
+    std::vector<vertex_size_t> components (boost::num_vertices(*reduced), 0);
+    size_t num = boost::strong_components(*reduced, &components[0]);
+    std::map<size_t, vertex_size_t> component_map;
+    mCRL2log(verbose) << "Shrinking the graph" << std::endl;
+    boost::graph_traits<parity_game_t >::vertex_iterator i, n;
+    for(boost::tie(i, n) = vertices(m_pg); i != n; ++i)
+    {
+      size_t group = components[*i];
+      if(component_map.count(group)==1) 
+      // If already present, we shrink the graph by merging i into u.
+      {
+        vertex_size_t u = component_map[group];
+        merge(m_pg, u, *i);
+        m_pg[*i].unused = true;
+      } 
+      else
+      // We haven't seen any vertices of this group yet, so we add it to the map.
+      {
+        component_map[group] = *i;
+      }
+    }
+    // We go over all the vertices and remove those which are unused.
+    for(auto i = 0; i < boost::num_vertices(m_pg);)
+    {
+      if(m_pg[i].unused)
+      {
+        boost::clear_vertex(i, m_pg);
+        boost::remove_vertex(i, m_pg);
+      } 
+      else 
+      {
+        i++;
+      }
+    }
+  }
+
+  typedef typename boost::graph_traits<parity_game_t>::
+      vertices_size_type vertex_size_t;
+  void merge(parity_game_t& pg, vertex_size_t s, vertex_size_t r)
+  /* Merge vertex r into vertex s*/
+  {
+    boost::graph_traits<parity_game_t>::out_edge_iterator oe, m;
+    for(boost::tie(oe,m) = out_edges(r, pg); oe != m; ++oe)
+    {
+      boost::add_edge(s, target(*oe, pg), pg); // Add new edge
+    }
+    boost::graph_traits<parity_game_t>::in_edge_iterator ie, n;
+    for(boost::tie(ie,n) = in_edges(r, pg); ie != n; ++ie)
+    {
+      boost::add_edge(source(*ie, pg), s, pg); // Add new edge
+    }
+  }
   
-  void convert_ks()
+  void convert_pg_to_ks()
   /* Convert Parity Game to a Kripke structure contained in lts_fsm_t. */
   {
     // LTS in which we save the Kripke structure
@@ -109,31 +184,36 @@ class pg_convert
     }
     m_lts.set_initial_state(0);
     size_t label = m_lts.add_action(action_label_string(" "));
+    size_t divergence_label = m_lts.add_action(action_label_string("d"));
     // Loop over all edges in the graph and add transitions to our lts
     boost::graph_traits<parity_game_t>::edge_iterator e, m;
     for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
     {
       size_t s = vertex_state_map[source(*e, m_pg)];
       size_t t = vertex_state_map[target(*e, m_pg)];
-      m_lts.add_transition(transition(s,label,t));
+      if (s == t) // If we have a self-loop, add divergence-label
+      {
+        m_lts.add_transition(transition(s,divergence_label,t));
+      } else
+      {
+        m_lts.add_transition(transition(s,label,t));
+      }
     }
   }
 
   void run(std::string file)
   {
-    std::ofstream m_ofstream;
     mCRL2log(verbose) << "Start of convert!" << std::endl;
-    convert_ks();
+    reduce_pg_scc(file);
+    // convert_pg_to_ks();
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts!" << std::endl;
-    liblts_kripke<lts_fsm_t> d(m_lts, true, true);
+    // lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t> d = 
+    //     lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t>(m_lts, true, true);
     // mCRL2log(verbose) << "Replacing LTS!" << std::endl;
-    d.replace_transition_system(true, true);
-    m_lts.save(file);
+    // m_lts.save(file);
     // convert_pg();
-    // std::ostream& os = open_output(file, m_ofstream);
-    // print_pgsolver(m_pg, os);
-    // mCRL2log(verbose) << "Printed file" << std::endl;
+    mCRL2log(verbose) << "Printed file" << std::endl;
   }
 };
 
