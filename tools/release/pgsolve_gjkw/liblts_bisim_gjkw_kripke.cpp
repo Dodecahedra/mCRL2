@@ -20,7 +20,7 @@
 ///
 /// \author David N. Jansen, Radboud Universiteit, Nijmegen, The Netherlands
 
-#include "mcrl2/lts/detail/liblts_bisim_gjkw.h"
+#include "liblts_bisim_gjkw_kripke.h"
 #include "mcrl2/lts/detail/coroutine.h"
 #include "mcrl2/lts/lts_aut.h"
 #include "mcrl2/lts/lts_fsm.h"
@@ -1411,9 +1411,8 @@ void part_trans_t::new_red_block_created(block_t* const RfnB,
                                                                                     }
                                                                                 #endif
 /// \brief constructor of the helper class
-template<class LTS_TYPE>
-bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
-bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool const branching,
+bisim_partitioner_gjkw_initialise_helper_kripke::
+bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t& l, bool const branching,
                                                 bool const preserve_divergence)
   : aut(l),
     nr_of_states(l.num_states()),
@@ -1426,44 +1425,53 @@ bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool const branching,
     noninert_out_per_block(1, 0),
     inert_out_per_block(1, 0),
     states_per_block(1, l.num_states()),
-    nr_of_nonbottom_states(0)
+    nonbottom_states_per_block(0, 0) // Should be a vector per block
 {
-    // log::mcrl2_logger::set_reporting_level(log::debug);
-
-    mCRL2log(log::verbose) << "O(m log n) "
-                    << (preserve_divergence ? "Divergence preserving b" : "B")
-                    << (branching ? "ranching b" : "")
-                    << "isimulation partitioner created for " << l.num_states()
-                    << " states and " << l.num_transitions()
-                    << " transitions [GJKW 2017]\n";
-    // Iterate over the transitions and collect new states
-    for (const transition& t: aut.get_transitions())
+    for (auto i = 0; i < aut.num_states(); ++i)
+    /* For each state, we get the state label and add a block (later used in init_transitions) */
     {
-        if (!branching || !aut.is_tau(aut.apply_hidden_label_map(t.label())) ||
-                                   (preserve_divergence && t.from() == t.to()))
+        std::vector<std::size_t> label = aut.state_label(i);
+
+        std::pair<std::unordered_map<std::vector<size_t>, state_type>::iterator,
+                bool> const state_block = state_block_map.insert(
+                        std::make_pair(label, states_per_block.size()));
+        // If we created a new block, increase vector sizes
+        if (state_block.second)
         {
-            // (possibly) create new state
-            Key const k(aut.apply_hidden_label_map(t.label()), t.to());
+            noninert_out_per_block.push_back(0);
+            inert_out_per_block.push_back(0);
+            states_per_block.push_back(0);
+        }
+    }
+
+    for (const transition& t: aut.get_transitions())
+    /* We only add an extra kripke state if it is a self-loop, extra state is of the form {d} */
+    {
+        // Create a new state if we have a self-loop
+        if (t.from() == t.to()) 
+        {
+            Key const k(aut.apply_hidden_label_map(t.label()), t.to()); // Since selp-loop, t.label()="d"
             std::pair<typename std::unordered_map<Key, state_type,
                 KeyHasher>::iterator,bool> extra_state = extra_kripke_states.
                                     insert(std::make_pair(k, nr_of_states));
             if (extra_state.second)
             {
+                // We created a new state, add it to the state vectors
                 noninert_in_per_state.push_back(0);
                 inert_in_per_state.push_back(0);
                 noninert_out_per_state.push_back(0);
                 inert_out_per_state.push_back(0);
 
-                // (possibly) create new block
                 std::pair<std::unordered_map<label_type, state_type>::iterator,
-                    bool> const action_block = action_block_map.insert(
-                          std::make_pair(aut.apply_hidden_label_map(t.label()),
-                                                     states_per_block.size()));
+                bool> const action_block = action_block_map.insert(
+                        std::make_pair(aut.apply_hidden_label_map(t.label()), // This should only return true once.
+                                                        states_per_block.size()));
                 if (action_block.second)
                 {
                     noninert_out_per_block.push_back(0);
                     inert_out_per_block.push_back(0);
                     states_per_block.push_back(0);
+                    nonbottom_states_per_block.push_back(0);
                 }
 
                 ++noninert_in_per_state[t.to()];
@@ -1471,34 +1479,49 @@ bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool const branching,
                 ++noninert_out_per_block[action_block.first->second];
                 ++states_per_block[action_block.first->second];
                 ++nr_of_states;
-                ++nr_of_transitions;
+                ++nr_of_transitions;            
             }
             ++noninert_in_per_state[extra_state.first->second];
             ++noninert_out_per_state[t.from()];
-            ++noninert_out_per_block[0];
-        }
+            // Instead of grabbing block 0, we grab the block which belongs to t.from()
+            std::vector<std::size_t> label = aut.state_label(t.from());
+            ++noninert_out_per_block[state_block_map[label]];
+        } 
         else
         {
-            ++inert_in_per_state[t.to()];
-            if (1 == ++inert_out_per_state[t.from()])
+            std::vector<std::size_t> label_from = aut.state_label(t.from());
+            state_type block_from = state_block_map[label_from];
+            std::vector<std::size_t> label_to = aut.state_label(t.to());
+            state_type block_to = state_block_map[label_to];
+            if (block_from == block_to)
             {
+                ++inert_in_per_state[t.to()];
+                if (1 == ++inert_out_per_state[t.from()])
+                {
                 // this is the first inert outgoing transition of t.from()
-                ++nr_of_nonbottom_states;
-            }
-            ++inert_out_per_block[0];
+                ++nonbottom_states_per_block[block_from];
+                }
+                ++inert_out_per_block[block_from];
+            } 
         }
+            } 
+            else
+            {
+                ++noninert_in_per_state[t.to()];
+                ++noninert_out_per_state[t.from()];
+                ++noninert_out_per_block[block_from];
+            }       
+    }
+            }       
+        }      
     }
     mCRL2log(log::verbose) << "Number of extra states: "
                                          << extra_kripke_states.size() << "\n";
-                                                                                #ifndef NDEBUG
-                                                                                    check_complexity::init(nr_of_states);
-                                                                                #endif
 }
 
 
 /// \brief initialise the state in part_st and the transitions in part_tr
-template<class LTS_TYPE>
-inline void bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
+inline void bisim_partitioner_gjkw_initialise_helper_kripke::
 init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                           bool const branching, bool const preserve_divergence)
 {                                                                               assert(part_st.state_size() == get_nr_of_states());
@@ -1513,7 +1536,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
     }
     std::vector<block_t*> blocks(states_per_block.size());
     B_to_C_iter_t B_to_C_begin = part_tr.B_to_C.begin();
-    for (state_type B = 0; B < states_per_block.size(); ++B) // Here we init the blocks (partitions)
+    for (state_type B = 0; B < states_per_block.size(); ++B)
     {
         permutation_iter_t const end = begin + states_per_block[B];
         blocks[B] = new block_t(constln, begin, end);
@@ -1540,8 +1563,9 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
         begin = end;
     }                                                                           assert(part_st.permutation.end() == begin);
     /* only block 0 has a sequence number and non-bottom states:             */ assert(part_tr.B_to_C.end() == B_to_C_begin);
+
     blocks[0]->assign_seqnr();
-    blocks[0]->set_bottom_begin(blocks[0]->begin() + nr_of_nonbottom_states);
+    blocks[0]->set_bottom_begin(blocks[0]->begin() + nonbottom_states_per_block[0]);
     blocks[0]->set_marked_nonbottom_begin(blocks[0]->bottom_begin());
 
     // initialise states and succ slices
@@ -1575,23 +1599,25 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
         }                                                                       else  assert(succ_end == succ_iter);
         if (s < aut.num_states())
         {
-            // s is not an extra Kripke state.  It is in block 0.
-            part_st.state_info[s].block = blocks[0]; // Change to be block with same state label
+            // We set the block that s is in.
+            std::vector<size_t> label = aut.state_label(s);
+            state_type block = state_block_map[label];
+            part_st.state_info[s].block = blocks[block];
             if (0 != inert_out_per_state[s])
             {
-                /* non-bottom state:                                         */ assert(0 != nr_of_nonbottom_states);
-                --nr_of_nonbottom_states;
-                part_st.state_info[s].pos = blocks[0]->begin() +
-                                                        nr_of_nonbottom_states;
+                /* non-bottom state:                                         */ assert(0 != nonbottom_states_per_block[block]);
+                --nonbottom_states_per_block[block];
+                part_st.state_info[s].pos = blocks[block]->begin() +
+                                                        nonbottom_states_per_block[block];
             }
             else
             {                                                                   // The following assertion is incomplete; only the second
                 // bottom state:                                                // assertion (after the assignment) makes sure that not too
                                                                                 // many states become part of this slice.
                                                                                 assert(0 != states_per_block[0]);
-                --states_per_block[0];
-                part_st.state_info[s].pos = blocks[0]->begin() +
-                                                           states_per_block[0]; assert(part_st.state_info[s].pos >= blocks[0]->bottom_begin());
+                --states_per_block[block];
+                part_st.state_info[s].pos = blocks[block]->begin() +
+                                                           states_per_block[block]; assert(part_st.state_info[s].pos >= blocks[0]->bottom_begin());
             }
             *part_st.state_info[s].pos = &part_st.state_info[s];
             // part_st.state_info[s].notblue = 0;
@@ -1601,16 +1627,15 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
     // initialise transitions (and finalise extra Kripke states)
     for (const transition& t: aut.get_transitions())
     {
-        if (!branching || !aut.is_tau(aut.apply_hidden_label_map(t.label())) || // Only do if from=to (divergent state)
-                                   (preserve_divergence && t.from() == t.to()))
+        if (t.from() == t.to())
         {
             // take transition through an extra intermediary state
-            Key const k(aut.apply_hidden_label_map(t.label()), t.to()); // Here tak divergent state stuff
+            Key const k(aut.apply_hidden_label_map(t.label()), t.to());
             state_type const extra_state = extra_kripke_states[k];
             if (0 != noninert_out_per_state[extra_state])
             {
                 state_type const extra_block =
-                       action_block_map[aut.apply_hidden_label_map(t.label())]; // If we set the transition label of extra blocks to d.
+                       action_block_map[aut.apply_hidden_label_map(t.label())];
                 // now initialise extra_state correctly
                 part_st.state_info[extra_state].block = blocks[extra_block];    assert(0 != states_per_block[extra_block]);
                 --states_per_block[extra_block];
@@ -1648,8 +1673,10 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
             --noninert_out_per_state[t.from()];
             succ_iter_t const t_succ=part_st.state_info[t.from()].succ_begin()+
                                               noninert_out_per_state[t.from()]; assert(0 != noninert_out_per_block[0]);
-            B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() -
-                                                   noninert_out_per_block[0]--;
+            std::vector<size_t> label = aut.state_label(t.from());
+            state_type block = state_block_map[label];
+            B_to_C_iter_t const t_B_to_C = blocks[block]->inert_begin() -
+                                                   noninert_out_per_block[block]--;
 
             t_pred->source = &part_st.state_info[t.from()];
             t_pred->succ = t_succ;
@@ -1658,27 +1685,51 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
             // t_B_to_C->B_to_C_slice = (already initialised);
             t_B_to_C->pred = t_pred;
         }
-        else
+        else // Other transitions (assumption was that from and to are in the same block)
         {
-            /* inert transition from t.from() to t.to()                      */ assert(0 != inert_in_per_state[t.to()]);
-            --inert_in_per_state[t.to()];
-            pred_iter_t const t_pred =
-                                part_st.state_info[t.to()].inert_pred_begin() +
-                                                    inert_in_per_state[t.to()]; assert(0 != inert_out_per_state[t.from()]);
-            --inert_out_per_state[t.from()];
-            succ_iter_t const t_succ =
-                              part_st.state_info[t.from()].inert_succ_begin() +
-                                                 inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[0]);
-            --inert_out_per_block[0];
-            B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() +
-                                                        inert_out_per_block[0];
+            // Find out if transition is inert or not.
+            std::vector<std::size_t> label_from = aut.state_label(t.from());
+            state_type block_from = state_block_map[label_from];
+            std::vector<std::size_t> label_to = aut.state_label(t.to());
+            state_type block_to = state_block_map[label_to];
+            if (block_to == block_from) // inert transition
+            {
+                /* inert transition from t.from() to t.to()                      */ assert(0 != inert_in_per_state[t.to()]);
+                --inert_in_per_state[t.to()];
+                pred_iter_t const t_pred =
+                                    part_st.state_info[t.to()].inert_pred_begin() +
+                                                        inert_in_per_state[t.to()]; assert(0 != inert_out_per_state[t.from()]);
+                --inert_out_per_state[t.from()];
+                succ_iter_t const t_succ =
+                                part_st.state_info[t.from()].inert_succ_begin() +
+                                                    inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[0]);
+                --inert_out_per_block[0];
+                B_to_C_iter_t const t_B_to_C = blocks[0]->inert_begin() +
+                                                            inert_out_per_block[0];
 
-            t_pred->source = &part_st.state_info[t.from()];
-            t_pred->succ = t_succ;
-            t_succ->target = &part_st.state_info[t.to()];
-            t_succ->B_to_C = t_B_to_C;
-            // t_B_to_C->B_to_C_slice = (already initialised);
-            t_B_to_C->pred = t_pred;
+                t_pred->source = &part_st.state_info[t.from()];
+                t_pred->succ = t_succ;
+                t_succ->target = &part_st.state_info[t.to()];
+                t_succ->B_to_C = t_B_to_C;
+                // t_B_to_C->B_to_C_slice = (already initialised);
+                t_B_to_C->pred = t_pred;
+            }
+            else // noninert transition
+            {
+                --noninert_in_per_state[t.to()];
+                --noninert_out_per_state[t.from()];
+                --noninert_out_per_block[block_from];
+
+                
+
+
+                // t_pred->source = &part_st.state_info[t.from()];
+                // t_pred->succ = t_succ;
+                // t_succ->target = &part_st.state_info[extra_state];
+                // t_succ->B_to_C = t_B_to_C;
+                // // t_B_to_C->B_to_C_slice = (already initialised);
+                // t_B_to_C->pred = t_pred;
+            }
         }
     }
     noninert_out_per_state.clear(); inert_out_per_state.clear();
@@ -1709,8 +1760,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
 ///
 /// \pre The bisimulation equivalence classes have been computed.
 /// \param branching Causes non-internal transitions to be removed.
-template <class LTS_TYPE>
-void bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
+void bisim_partitioner_gjkw_initialise_helper_kripke::
          replace_transition_system(const part_state_t& part_st,                 ONLY_IF_DEBUG( const bool branching, )
                                    const bool preserve_divergence)
 {
@@ -1796,7 +1846,7 @@ void bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
     if (aut.has_state_info())   /* If there are no state labels this step can be ignored */
     {
       /* Create a vector for the new labels */
-      std::vector<typename LTS_TYPE::state_label_t> new_labels(block_t::nr_of_blocks);
+      std::vector<typename lts_fsm_t::state_label_t> new_labels(block_t::nr_of_blocks);
 
       for(std::size_t i=aut.num_states(); i>0; )
       {
@@ -1829,8 +1879,7 @@ void bisim_partitioner_gjkw_initialise_helper<LTS_TYPE>::
 
 
 
-template <class LTS_TYPE>
-void bisim_partitioner_gjkw<LTS_TYPE>::create_initial_partition_gjkw(
+void bisim_partitioner_gjkw_kripke::create_initial_partition_gjkw(
                           bool const branching, bool const preserve_divergence)
 {
     // 2.2: P := P_0, i. e. the initial, cycle-free partition; C = {S}
@@ -1841,8 +1890,7 @@ void bisim_partitioner_gjkw<LTS_TYPE>::create_initial_partition_gjkw(
 }
 
 
-template <class LTS_TYPE>
-void bisim_partitioner_gjkw<LTS_TYPE>::
+void bisim_partitioner_gjkw_kripke::
                                 refine_partition_until_it_becomes_stable_gjkw()
 {
                                                                                 #ifndef NDEBUG
@@ -2358,8 +2406,7 @@ void bisim_partitioner_gjkw<LTS_TYPE>::
 ///                         new bottom states
 /// \result a pointer to the block that contains the red part of `RfnB`.
 
-template <class LTS_TYPE>
-bisim_gjkw::block_t* bisim_partitioner_gjkw<LTS_TYPE>::refine(
+bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke::refine(
        bisim_gjkw::block_t* const RfnB, const bisim_gjkw::constln_t* const SpC,
        const bisim_gjkw::B_to_C_descriptor* const FromRed,
        bool const postprocessing                                                ONLY_IF_DEBUG( , const bisim_gjkw::constln_t* NewC )
@@ -3001,8 +3048,7 @@ typedef std::set<bisim_gjkw::constln_t*, constln_ptr_less> R_map_t;
 /// \returns the block containing the old bottom states (and every state in
 ///          RedB that can reach some old bottom state through inert
 ///          transitions)
-template <class LTS_TYPE>
-bisim_gjkw::block_t* bisim_partitioner_gjkw<LTS_TYPE>::postprocess_new_bottom(
+bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke::postprocess_new_bottom(
                                             bisim_gjkw::block_t* RedB
                                             /* , bisim_gjkw::block_t* BlueB */)
 {                                                                               assert(0 != RedB->unmarked_bottom_size());
@@ -3243,20 +3289,6 @@ Line_4_4:
 =                       explicit instantiation requests                       =
 =============================================================================*/
 
-
-
-namespace bisim_gjkw
-{
-
-template class bisim_partitioner_gjkw_initialise_helper<lts_lts_t>;
-template class bisim_partitioner_gjkw_initialise_helper<lts_aut_t>;
-template class bisim_partitioner_gjkw_initialise_helper<lts_fsm_t>;
-
-} // end namespace bisim_gjkw
-
-template class bisim_partitioner_gjkw<lts_lts_t>;
-template class bisim_partitioner_gjkw<lts_aut_t>;
-template class bisim_partitioner_gjkw<lts_fsm_t>;
 
 } // end namespace detail
 } // end namespace lts

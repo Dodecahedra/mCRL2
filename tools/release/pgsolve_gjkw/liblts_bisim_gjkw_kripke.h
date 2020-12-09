@@ -30,6 +30,7 @@
 #include "mcrl2/lts/detail/liblts_merge.h"
 #include "mcrl2/lts/detail/check_complexity.h"
 #include "mcrl2/lts/detail/fixed_vector.h"
+#include "mcrl2/lts/lts_fsm.h"
 
 namespace mcrl2
 {
@@ -1003,8 +1004,7 @@ class constln_t
 };
 
 
-template <class LTS_TYPE>
-class bisim_partitioner_gjkw_initialise_helper;
+class bisim_partitioner_gjkw_initialise_helper_kripke;
 
 class part_trans_t;
 
@@ -1029,8 +1029,7 @@ class part_state_t
     /// `state_info_entry`.
     fixed_vector<state_info_entry> state_info;
 
-    template <class LTS_TYPE>
-    friend class bisim_partitioner_gjkw_initialise_helper;
+    friend class bisim_partitioner_gjkw_initialise_helper_kripke;
   public:
     /// \brief constructor
     /// \details The constructor allocates memory, but does not actually
@@ -1441,8 +1440,7 @@ class part_trans_t
     fixed_vector<succ_entry> succ;
     fixed_vector<B_to_C_entry> B_to_C;
 
-    template <class LTS_TYPE>
-    friend class bisim_partitioner_gjkw_initialise_helper;
+    friend class bisim_partitioner_gjkw_initialise_helper_kripke;
 
     void swap_in(B_to_C_iter_t const pos1, B_to_C_iter_t const pos2)
     {                                                                           assert(B_to_C.end() > pos1);  assert(pos1->pred->succ->B_to_C == pos1);
@@ -1651,11 +1649,10 @@ class part_trans_t
 ///
 /// The helper class also initialises the variables used by check_complexity to
 /// find the number of states and transitions in time complexity checks.
-template<class LTS_TYPE>
-class bisim_partitioner_gjkw_initialise_helper
+class bisim_partitioner_gjkw_initialise_helper_kripke
 {
   private:
-    LTS_TYPE& aut;
+    lts_fsm_t aut;
     state_type nr_of_states;
     const state_type orig_nr_of_states;
     trans_type nr_of_transitions;
@@ -1692,6 +1689,7 @@ class bisim_partitioner_gjkw_initialise_helper
     // (also used when converting Kripke structure back to LTS)
     std::unordered_map<Key, state_type, KeyHasher> extra_kripke_states;
 
+    std::unordered_map<std::vector<size_t>, state_type> state_block_map;
     // temporary map to keep track of blocks. maps transition labels (different
     // from tau) to blocks
     std::unordered_map<label_type, state_type> action_block_map;
@@ -1700,10 +1698,13 @@ class bisim_partitioner_gjkw_initialise_helper
     std::vector<state_type> noninert_in_per_state, inert_in_per_state;
     std::vector<state_type> noninert_out_per_block, inert_out_per_block;
     std::vector<state_type> states_per_block;
-    state_type nr_of_nonbottom_states;
+    /* Number of nonbottom states for each block */
+    std::vector<state_type> nonbottom_states_per_block;
   public:
-    bisim_partitioner_gjkw_initialise_helper(LTS_TYPE& l, bool branching,
+    bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t& l, bool branching,
                                                      bool preserve_divergence);
+
+    void init_kripke(bool branching, bool preserve_divergence);
 
     /// initialise the state in part_st and the transitions in part_tr
     void init_transitions(part_state_t& part_st, part_trans_t& part_tr,
@@ -1737,18 +1738,17 @@ struct refine_shared_t;
 
 /// \class bisim_partitioner_gjkw
 /// \brief implements the main algorithm for the stutter equivalence quotient
-template <class LTS_TYPE>
-class bisim_partitioner_gjkw
+class bisim_partitioner_gjkw_kripke
 {
   private:
-    bisim_gjkw::bisim_partitioner_gjkw_initialise_helper<LTS_TYPE> init_helper;
+    bisim_gjkw::bisim_partitioner_gjkw_initialise_helper_kripke init_helper;
     bisim_gjkw::part_state_t part_st;
     bisim_gjkw::part_trans_t part_tr;
   public:
     // The constructor constructs the data structures and immediately
     // calculates the bisimulation quotient.  However, it does not change the
     // LTS.
-    bisim_partitioner_gjkw(LTS_TYPE& l, bool branching = false,
+    bisim_partitioner_gjkw_kripke(lts_fsm_t& l, bool branching = false,
                                         bool preserve_divergence = false)
       : init_helper(l, branching, preserve_divergence),
         part_st(init_helper.get_nr_of_states()),
@@ -1757,7 +1757,7 @@ class bisim_partitioner_gjkw
         create_initial_partition_gjkw(branching, preserve_divergence);
         refine_partition_until_it_becomes_stable_gjkw();
     }
-    ~bisim_partitioner_gjkw()
+    ~bisim_partitioner_gjkw_kripke()
     {
         part_tr.clear();
         part_st.clear();
@@ -1789,7 +1789,7 @@ class bisim_partitioner_gjkw
         return part_st.block(s) == part_st.block(t);
     }
 
-  private:
+  protected:
 
     /*-------- dbStutteringEquivalence -- Algorithm 2 of [GJKW 2017] --------*/
 
@@ -1841,8 +1841,7 @@ class bisim_partitioner_gjkw
  *                                    actions on states must be preserved. If
  *                                    false these are removed. If true these
  *                                    are preserved. */
-template <class LTS_TYPE>
-void bisimulation_reduce_gjkw(LTS_TYPE& l, bool branching = false,
+void bisimulation_reduce_gjkw(lts_fsm_t& l, bool branching = false,
                                             bool preserve_divergence = false);
 
 /** \brief Checks whether the two initial states of two LTSs are strong or
@@ -1858,8 +1857,7 @@ void bisimulation_reduce_gjkw(LTS_TYPE& l, bool branching = false,
  *                                    tau loops on states.
  * \retval True iff the initial states of the current transition system and l2
  * are (divergence preserving) (branching) bisimilar. */
-template <class LTS_TYPE>
-bool destructive_bisimulation_compare_gjkw(LTS_TYPE& l1, LTS_TYPE& l2,
+bool destructive_bisimulation_compare_gjkw(lts_fsm_t& l1, lts_fsm_t& l2,
                     bool branching = false, bool preserve_divergence = false,
                                     bool generate_counter_examples = false);
 
@@ -1878,13 +1876,11 @@ bool destructive_bisimulation_compare_gjkw(LTS_TYPE& l1, LTS_TYPE& l2,
  *                                    tau loops on states.
  * \retval True iff the initial states of the current transition system and l2
  * are (divergence preserving) (branching) bisimilar. */
-template <class LTS_TYPE>
-bool bisimulation_compare_gjkw(const LTS_TYPE& l1, const LTS_TYPE& l2,
+bool bisimulation_compare_gjkw(const lts_fsm_t l1, const lts_fsm_t l2,
                     bool branching = false, bool preserve_divergence = false);
 
 /// calculates the bisimulation quotient of a LTS.
-template <class LTS_TYPE>
-void bisimulation_reduce_gjkw(LTS_TYPE& l, bool const branching /* = false */,
+void bisimulation_reduce_gjkw(lts_fsm_t& l, bool const branching /* = false */,
                                   bool const preserve_divergence /* = false */)
 {
   // First, remove tau loops in case of branching bisimulation.
@@ -1895,25 +1891,23 @@ void bisimulation_reduce_gjkw(LTS_TYPE& l, bool const branching /* = false */,
 
   // Second, apply the branching bisimulation reduction algorithm. If there are
   // no taus, this will automatically yield strong bisimulation.
-  detail::bisim_partitioner_gjkw<LTS_TYPE> bisim_part(l, branching,
+  detail::bisim_partitioner_gjkw_kripke bisim_part(l, branching,
                                                           preserve_divergence);
 
   // Assign the reduced LTS
   bisim_part.replace_transition_system(branching, preserve_divergence);
 }
 
-template <class LTS_TYPE>
-inline bool bisimulation_compare_gjkw(const LTS_TYPE& l1, const LTS_TYPE& l2,
+inline bool bisimulation_compare_gjkw(const lts_fsm_t& l1, const lts_fsm_t& l2,
           bool branching /* = false */, bool preserve_divergence /* = false */)
 {
-  LTS_TYPE l1_copy(l1);
-  LTS_TYPE l2_copy(l2);
+  lts_fsm_t l1_copy(l1);
+  lts_fsm_t l2_copy(l2);
   return destructive_bisimulation_compare_gjkw(l1_copy, l2_copy, branching,
                                                           preserve_divergence);
 }
 
-template <class LTS_TYPE>
-bool destructive_bisimulation_compare_gjkw(LTS_TYPE& l1, LTS_TYPE& l2,
+bool destructive_bisimulation_compare_gjkw(lts_fsm_t& l1, lts_fsm_t& l2,
           bool branching /* = false */, bool preserve_divergence /* = false */,
                                            bool generate_counter_examples /* = false */,
                                            bool /*structured_output = false */)
@@ -1930,12 +1924,12 @@ bool destructive_bisimulation_compare_gjkw(LTS_TYPE& l1, LTS_TYPE& l2,
   // First remove tau loops in case of branching bisimulation.
   if (branching)
   {
-    detail::scc_partitioner<LTS_TYPE> scc_part(l1);
+    detail::scc_partitioner<lts_fsm_t> scc_part(l1);
     scc_part.replace_transition_system(preserve_divergence);
     init_l2 = scc_part.get_eq_class(init_l2);
   }
 
-  detail::bisim_partitioner_gjkw<LTS_TYPE> bisim_part(l1, branching,
+  detail::bisim_partitioner_gjkw_kripke bisim_part(l1, branching,
                                                           preserve_divergence);
   return bisim_part.in_same_class(l1.initial_state(), init_l2);
 }
