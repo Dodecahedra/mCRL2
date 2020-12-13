@@ -11,10 +11,11 @@
 /// branching bisimulation equivalence using the O(m log m) algorithm 
 /// [Groote/Jansen/Keiren/Wijs 2017]
 
+#include "liblts_bisim_gjkw_kripke.h"
+#include "mcrl2/lts/lts_fsm.h"
 #include "mcrl2/utilities/input_output_tool.h"
 #include "pg.h"
 #include "pgsolver_io.h"
-#include "liblts_bisim_gjkw_kripke.h"
 #include "utilities.h"
 #include "mcrl2/lts/lts_algorithm.h"
 #include "scc.h"
@@ -203,14 +204,14 @@ class pg_convert
 
   void run(std::string file)
   {
-    mCRL2log(verbose) << "Start of convert!" << std::endl;
+    mCRL2log(verbose) << "TEST!!" << std::endl;
     reduce_pg_scc(file);
     // convert_pg_to_ks();
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts!" << std::endl;
     // lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t> d = 
     //     lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t>(m_lts, true, true);
-    // mCRL2log(verbose) << "Replacing LTS!" << std::endl;
+    mCRL2log(verbose) << "Replacing LTS!" << std::endl;
     // m_lts.save(file);
     // convert_pg();
     mCRL2log(verbose) << "Printed file" << std::endl;

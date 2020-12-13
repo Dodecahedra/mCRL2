@@ -1411,8 +1411,9 @@ void part_trans_t::new_red_block_created(block_t* const RfnB,
                                                                                     }
                                                                                 #endif
 /// \brief constructor of the helper class
-bisim_partitioner_gjkw_initialise_helper_kripke::
-bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t& l, bool const branching,
+template<class LTS_TYPE>
+bisim_partitioner_gjkw_initialise_helper_kripke<LTS_TYPE>::
+bisim_partitioner_gjkw_initialise_helper_kripke(LTS_TYPE& l, bool const branching,
                                                 bool const preserve_divergence)
   : aut(l),
     nr_of_states(l.num_states()),
@@ -1425,7 +1426,7 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t& l, bool const branchi
     noninert_out_per_block(1, 0),
     inert_out_per_block(1, 0),
     states_per_block(1, l.num_states()),
-    nonbottom_states_per_block(0, 0) // Should be a vector per block
+    nr_of_nonbottom_states(0)
 {
     for (auto i = 0; i < aut.num_states(); ++i)
     /* For each state, we get the state label and add a block (later used in init_transitions) */
@@ -1503,28 +1504,29 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t& l, bool const branchi
                 }
                 ++inert_out_per_block[block_from];
             } 
-        }
-            } 
             else
             {
                 ++noninert_in_per_state[t.to()];
                 ++noninert_out_per_state[t.from()];
                 ++noninert_out_per_block[block_from];
-            }       
-    }
-            }       
-        }      
+            }            
+        }
     }
     mCRL2log(log::verbose) << "Number of extra states: "
                                          << extra_kripke_states.size() << "\n";
+                                                                                #ifndef NDEBUG
+                                                                                    check_complexity::init(nr_of_states);
+                                                                                #endif
 }
 
 
 /// \brief initialise the state in part_st and the transitions in part_tr
-inline void bisim_partitioner_gjkw_initialise_helper_kripke::
+template<class LTS_TYPE>
+inline void bisim_partitioner_gjkw_initialise_helper_kripke<LTS_TYPE>::
 init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                           bool const branching, bool const preserve_divergence)
-{                                                                               assert(part_st.state_size() == get_nr_of_states());
+{
+                                                                                assert(part_st.state_size() == get_nr_of_states());
                                                                                 assert(part_tr.trans_size() == get_nr_of_transitions());
     // initialise blocks and B_to_C slices
     permutation_iter_t begin = part_st.permutation.begin();
@@ -1563,8 +1565,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
         begin = end;
     }                                                                           assert(part_st.permutation.end() == begin);
     /* only block 0 has a sequence number and non-bottom states:             */ assert(part_tr.B_to_C.end() == B_to_C_begin);
-
-    blocks[0]->assign_seqnr();
+    // TODO: do this for the other blocks as well, since those can have non-bottom states as well
+    blocks[0]->assign_seqnr(); 
     blocks[0]->set_bottom_begin(blocks[0]->begin() + nonbottom_states_per_block[0]);
     blocks[0]->set_marked_nonbottom_begin(blocks[0]->bottom_begin());
 
@@ -1719,16 +1721,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                 --noninert_in_per_state[t.to()];
                 --noninert_out_per_state[t.from()];
                 --noninert_out_per_block[block_from];
-
-                
-
-
-                // t_pred->source = &part_st.state_info[t.from()];
-                // t_pred->succ = t_succ;
-                // t_succ->target = &part_st.state_info[extra_state];
-                // t_succ->B_to_C = t_B_to_C;
-                // // t_B_to_C->B_to_C_slice = (already initialised);
-                // t_B_to_C->pred = t_pred;
+                /* TODO: implement init for non-inert transition, i.e. the transition
+                  leaves the block and enters another*/
             }
         }
     }
@@ -1742,6 +1736,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
     mCRL2log(log::verbose) << "Size of the resulting Kripke structure: "
                                << get_nr_of_states() << " states and "
                                << get_nr_of_transitions() << " transitions.\n";
+
 }
 
 /// \brief Replaces the transition relation of the current LTS by the
@@ -1760,7 +1755,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
 ///
 /// \pre The bisimulation equivalence classes have been computed.
 /// \param branching Causes non-internal transitions to be removed.
-void bisim_partitioner_gjkw_initialise_helper_kripke::
+template <class LTS_TYPE>
+void bisim_partitioner_gjkw_initialise_helper_kripke<LTS_TYPE>::
          replace_transition_system(const part_state_t& part_st,                 ONLY_IF_DEBUG( const bool branching, )
                                    const bool preserve_divergence)
 {
@@ -1846,7 +1842,7 @@ void bisim_partitioner_gjkw_initialise_helper_kripke::
     if (aut.has_state_info())   /* If there are no state labels this step can be ignored */
     {
       /* Create a vector for the new labels */
-      std::vector<typename lts_fsm_t::state_label_t> new_labels(block_t::nr_of_blocks);
+      std::vector<typename LTS_TYPE::state_label_t> new_labels(block_t::nr_of_blocks);
 
       for(std::size_t i=aut.num_states(); i>0; )
       {
@@ -1879,7 +1875,8 @@ void bisim_partitioner_gjkw_initialise_helper_kripke::
 
 
 
-void bisim_partitioner_gjkw_kripke::create_initial_partition_gjkw(
+template <class LTS_TYPE>
+void bisim_partitioner_gjkw_kripke<LTS_TYPE>::create_initial_partition_gjkw_kripke(
                           bool const branching, bool const preserve_divergence)
 {
     // 2.2: P := P_0, i. e. the initial, cycle-free partition; C = {S}
@@ -1890,8 +1887,9 @@ void bisim_partitioner_gjkw_kripke::create_initial_partition_gjkw(
 }
 
 
-void bisim_partitioner_gjkw_kripke::
-                                refine_partition_until_it_becomes_stable_gjkw()
+template <class LTS_TYPE>
+void bisim_partitioner_gjkw_kripke<LTS_TYPE>::
+                                refine_partition_until_it_becomes_stable_gjkw_kripke()
 {
                                                                                 #ifndef NDEBUG
                                                                                     if (mCRL2logEnabled(log::debug, "bisim_gjkw"))
@@ -2406,7 +2404,8 @@ void bisim_partitioner_gjkw_kripke::
 ///                         new bottom states
 /// \result a pointer to the block that contains the red part of `RfnB`.
 
-bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke::refine(
+template <class LTS_TYPE>
+bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke<LTS_TYPE>::refine(
        bisim_gjkw::block_t* const RfnB, const bisim_gjkw::constln_t* const SpC,
        const bisim_gjkw::B_to_C_descriptor* const FromRed,
        bool const postprocessing                                                ONLY_IF_DEBUG( , const bisim_gjkw::constln_t* NewC )
@@ -3048,7 +3047,8 @@ typedef std::set<bisim_gjkw::constln_t*, constln_ptr_less> R_map_t;
 /// \returns the block containing the old bottom states (and every state in
 ///          RedB that can reach some old bottom state through inert
 ///          transitions)
-bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke::postprocess_new_bottom(
+template <class LTS_TYPE>
+bisim_gjkw::block_t* bisim_partitioner_gjkw_kripke<LTS_TYPE>::postprocess_new_bottom(
                                             bisim_gjkw::block_t* RedB
                                             /* , bisim_gjkw::block_t* BlueB */)
 {                                                                               assert(0 != RedB->unmarked_bottom_size());
@@ -3289,6 +3289,20 @@ Line_4_4:
 =                       explicit instantiation requests                       =
 =============================================================================*/
 
+
+
+namespace bisim_gjkw
+{
+
+template class bisim_partitioner_gjkw_initialise_helper_kripke<lts_lts_t>;
+template class bisim_partitioner_gjkw_initialise_helper_kripke<lts_aut_t>;
+template class bisim_partitioner_gjkw_initialise_helper_kripke<lts_fsm_t>;
+
+} // end namespace bisim_gjkw
+
+template class bisim_partitioner_gjkw_kripke<lts_lts_t>;
+template class bisim_partitioner_gjkw_kripke<lts_aut_t>;
+template class bisim_partitioner_gjkw_kripke<lts_fsm_t>;
 
 } // end namespace detail
 } // end namespace lts

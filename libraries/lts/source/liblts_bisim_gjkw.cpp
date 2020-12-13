@@ -1605,7 +1605,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                                    (preserve_divergence && t.from() == t.to()))
         {
             // take transition through an extra intermediary state
-            Key const k(aut.apply_hidden_label_map(t.label()), t.to()); // Here tak divergent state stuff
+            Key const k(aut.apply_hidden_label_map(t.label()), t.to());
             state_type const extra_state = extra_kripke_states[k];
             if (0 != noninert_out_per_state[extra_state])
             {
