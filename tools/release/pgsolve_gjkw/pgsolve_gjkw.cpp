@@ -209,8 +209,7 @@ class pg_convert
     // convert_pg_to_ks();
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts!" << std::endl;
-    // lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t> d = 
-    //     lts::detail::bisim_partitioner_gjkw_kripke<lts_fsm_t>(m_lts, true, true);
+    lts::detail::bisim_partitioner_gjkw_kripke(m_lts, true, true);
     mCRL2log(verbose) << "Replacing LTS!" << std::endl;
     // m_lts.save(file);
     // convert_pg();

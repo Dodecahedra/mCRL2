@@ -31,6 +31,8 @@
 #include "mcrl2/lts/detail/check_complexity.h"
 #include "mcrl2/lts/detail/fixed_vector.h"
 
+#include "mcrl2/lts/lts_fsm.h"
+
 namespace mcrl2
 {
 namespace lts
@@ -1746,7 +1748,7 @@ class bisim_partitioner_gjkw_kripke
     // The constructor constructs the data structures and immediately
     // calculates the bisimulation quotient.  However, it does not change the
     // LTS.
-    bisim_partitioner_gjkw_kripke(lts_fsm_t l, bool branching = false,
+    bisim_partitioner_gjkw_kripke(lts_fsm_t& l, bool branching = false,
                                         bool preserve_divergence = false)
       : init_helper(l, branching, preserve_divergence),
         part_st(init_helper.get_nr_of_states()),
@@ -1893,7 +1895,7 @@ void bisimulation_reduce_gjkw(LTS_TYPE& l, bool const branching /* = false */,
 
   // Second, apply the branching bisimulation reduction algorithm. If there are
   // no taus, this will automatically yield strong bisimulation.
-  detail::bisim_partitioner_gjkw_kripke<LTS_TYPE> bisim_part(l, branching,
+  detail::bisim_partitioner_gjkw_kripke bisim_part(l, branching,
                                                           preserve_divergence);
 
   // Assign the reduced LTS
@@ -1933,7 +1935,7 @@ bool destructive_bisimulation_compare_gjkw(LTS_TYPE& l1, LTS_TYPE& l2,
     init_l2 = scc_part.get_eq_class(init_l2);
   }
 
-  detail::bisim_partitioner_gjkw_kripke<LTS_TYPE> bisim_part(l1, branching,
+  detail::bisim_partitioner_gjkw_kripke bisim_part(l1, branching,
                                                           preserve_divergence);
   return bisim_part.in_same_class(l1.initial_state(), init_l2);
 }
