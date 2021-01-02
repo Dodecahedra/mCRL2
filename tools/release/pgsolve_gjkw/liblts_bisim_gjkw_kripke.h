@@ -1003,7 +1003,6 @@ class constln_t
 };
 
 
-template <class LTS_TYPE>
 class bisim_partitioner_gjkw_initialise_helper_kripke;
 
 class part_trans_t;
@@ -1029,7 +1028,6 @@ class part_state_t
     /// `state_info_entry`.
     fixed_vector<state_info_entry> state_info;
 
-    template <class LTS_TYPE>
     friend class bisim_partitioner_gjkw_initialise_helper_kripke;
   public:
     /// \brief constructor
@@ -1441,7 +1439,6 @@ class part_trans_t
     fixed_vector<succ_entry> succ;
     fixed_vector<B_to_C_entry> B_to_C;
 
-    template <class LTS_TYPE>
     friend class bisim_partitioner_gjkw_initialise_helper_kripke;
 
     void swap_in(B_to_C_iter_t const pos1, B_to_C_iter_t const pos2)
@@ -1651,11 +1648,10 @@ class part_trans_t
 ///
 /// The helper class also initialises the variables used by check_complexity to
 /// find the number of states and transitions in time complexity checks.
-template<class LTS_TYPE>
 class bisim_partitioner_gjkw_initialise_helper_kripke
 {
   private:
-    LTS_TYPE& aut;
+    lts_fsm_t aut;
     state_type nr_of_states;
     const state_type orig_nr_of_states;
     trans_type nr_of_transitions;
@@ -1692,6 +1688,9 @@ class bisim_partitioner_gjkw_initialise_helper_kripke
     // (also used when converting Kripke structure back to LTS)
     std::unordered_map<Key, state_type, KeyHasher> extra_kripke_states;
 
+    // Keep track of which block each state is a part of
+    std::unordered_map<std::vector<std::size_t>, state_type> state_block_map;
+
     // temporary map to keep track of blocks. maps transition labels (different
     // from tau) to blocks
     std::unordered_map<label_type, state_type> action_block_map;
@@ -1700,9 +1699,9 @@ class bisim_partitioner_gjkw_initialise_helper_kripke
     std::vector<state_type> noninert_in_per_state, inert_in_per_state;
     std::vector<state_type> noninert_out_per_block, inert_out_per_block;
     std::vector<state_type> states_per_block;
-    state_type nr_of_nonbottom_states;
+    std::vector<state_type> nonbottom_states_per_block;
   public:
-    bisim_partitioner_gjkw_initialise_helper_kripke(LTS_TYPE& l, bool branching,
+    bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t l, bool branching,
                                                      bool preserve_divergence);
 
     /// initialise the state in part_st and the transitions in part_tr
@@ -1737,18 +1736,17 @@ struct refine_shared_t;
 
 /// \class bisim_partitioner_gjkw
 /// \brief implements the main algorithm for the stutter equivalence quotient
-template <class LTS_TYPE>
 class bisim_partitioner_gjkw_kripke
 {
   private:
-    bisim_gjkw::bisim_partitioner_gjkw_initialise_helper_kripke<LTS_TYPE> init_helper;
+    bisim_gjkw::bisim_partitioner_gjkw_initialise_helper_kripke init_helper;
     bisim_gjkw::part_state_t part_st;
     bisim_gjkw::part_trans_t part_tr;
   public:
     // The constructor constructs the data structures and immediately
     // calculates the bisimulation quotient.  However, it does not change the
     // LTS.
-    bisim_partitioner_gjkw_kripke(LTS_TYPE& l, bool branching = false,
+    bisim_partitioner_gjkw_kripke(lts_fsm_t l, bool branching = false,
                                         bool preserve_divergence = false)
       : init_helper(l, branching, preserve_divergence),
         part_st(init_helper.get_nr_of_states()),
