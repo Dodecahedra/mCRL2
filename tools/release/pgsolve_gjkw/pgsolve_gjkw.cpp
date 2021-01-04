@@ -195,7 +195,8 @@ class pg_convert
       if (s == t) // If we have a self-loop, add divergence-label
       {
         m_lts.add_transition(transition(s,divergence_label,t));
-      } else
+      } 
+      else
       {
         m_lts.add_transition(transition(s,label,t));
       }
@@ -204,14 +205,13 @@ class pg_convert
 
   void run(std::string file)
   {
-    mCRL2log(verbose) << "TEST!!" << std::endl;
     reduce_pg_scc(file);
-    // convert_pg_to_ks();
+    convert_pg_to_ks();
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts!" << std::endl;
     lts::detail::bisim_partitioner_gjkw_kripke(m_lts, true, true);
     mCRL2log(verbose) << "Replacing LTS!" << std::endl;
-    // m_lts.save(file);
+    m_lts.save(file);
     // convert_pg();
     mCRL2log(verbose) << "Printed file" << std::endl;
   }

@@ -959,7 +959,9 @@ class constln_t
     /// block.
     block_t* split_off_small_block()
     {                                                                           assert(begin() < end());
-        block_t* const FirstB = (*begin())->block;
+        mCRL2log(log::verbose) << "2.1 Begin splitting off" << std::endl; 
+        block_t* const FirstB = (*begin())->block; // <-- Crashes here 
+        mCRL2log(log::verbose) << "2.2 Get FirstB" << std::endl;
         block_t* const LastB = end()[-1]->block;                                assert(FirstB != LastB);
         if (FirstB->end() == LastB->begin())  make_trivial();                   assert(FirstB->constln() == this);  assert(LastB->constln() == this);
                                                                                 assert(postprocess_begin == postprocess_end);
@@ -991,6 +993,7 @@ class constln_t
             FirstB->set_constln(NewC);
             return FirstB;
         }
+        mCRL2log(log::verbose) << "2.4 End of spliting off small block" << std::endl;
     }
                                                                                 #ifndef NDEBUG
                                                                                     /// \brief print a constellation identification for debugging
@@ -1754,8 +1757,11 @@ class bisim_partitioner_gjkw_kripke
         part_st(init_helper.get_nr_of_states()),
         part_tr(init_helper.get_nr_of_transitions())
     {                                                                           assert(branching || !preserve_divergence);
+        mCRL2log(log::verbose) << "Now creating initial partition..." << std::endl;
         create_initial_partition_gjkw_kripke(branching, preserve_divergence);
-        refine_partition_until_it_becomes_stable_gjkw_kripke();
+        mCRL2log(log::verbose) << "Now refining until it becomes stable..." << std::endl;
+        refine_partition_until_it_becomes_stable_gjkw_kripke(); // <-- Crashes in here
+        mCRL2log(log::verbose) << "Exiting partitioner..." << std::endl;
     }
     ~bisim_partitioner_gjkw_kripke()
     {
