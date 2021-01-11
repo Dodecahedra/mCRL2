@@ -281,6 +281,7 @@ block_t* block_t::split_off_red(permutation_iter_t const red_nonbottom_begin)
                                                                                                 }
                                                                                                 else
                                                                                                 {
+                                                                                                    state_type const block_no = B->seqnr();
                                                                                                     assert(B->inert_end() ==
                                                                                                                          B->inert_end()[-1].B_to_C_slice->end);
                                                                                                     assert(B->inert_end()[-1].B_to_C_slice->from_block() == B);
@@ -1421,11 +1422,7 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t l, bool const branchin
     noninert_out_per_state(l.num_states(), 0),
     inert_out_per_state(l.num_states(), 0),
     noninert_in_per_state(l.num_states(), 0),
-    inert_in_per_state(l.num_states(), 0),
-    noninert_out_per_block(1, 0),
-    inert_out_per_block(1, 0),
-    states_per_block(1, l.num_states()),
-    nonbottom_states_per_block(0, l.num_states())
+    inert_in_per_state(l.num_states(), 0)
 {
     for (auto i = 0; i < aut.num_states(); ++i)
     /* For each state, we get the state label and add a block (later used in init_transitions) */
@@ -1438,10 +1435,13 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t l, bool const branchin
         // If we created a new block, increase vector sizes
         if (state_block.second)
         {
+            mCRL2log(log::verbose) << i << ": block: " << states_per_block.size() << std::endl;
             noninert_out_per_block.push_back(0);
             inert_out_per_block.push_back(0);
             states_per_block.push_back(0);
+            nonbottom_states_per_block.push_back(0);
         }
+        ++states_per_block[state_block.first->second];
     }
 
     for (const transition& t: aut.get_transitions())
@@ -1479,7 +1479,7 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t l, bool const branchin
                 ++noninert_out_per_block[action_block.first->second];
                 ++states_per_block[action_block.first->second];
                 ++nr_of_states;
-                ++nr_of_transitions;            
+                ++nr_of_transitions;
             }
             ++noninert_in_per_state[extra_state.first->second];
             ++noninert_out_per_state[t.from()];
@@ -1499,7 +1499,7 @@ bisim_partitioner_gjkw_initialise_helper_kripke(lts_fsm_t l, bool const branchin
                 if (1 == ++inert_out_per_state[t.from()])
                 {
                 // this is the first inert outgoing transition of t.from()
-                ++nonbottom_states_per_block[block_from];
+                  ++nonbottom_states_per_block[block_from];
                 }
                 ++inert_out_per_block[block_from];
             } 
@@ -1538,6 +1538,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
     B_to_C_iter_t B_to_C_begin = part_tr.B_to_C.begin();
     for (state_type B = 0; B < states_per_block.size(); ++B)
     {
+      assert(states_per_block[B] > 0);
         permutation_iter_t const end = begin + states_per_block[B];
         blocks[B] = new block_t(constln, begin, end);
         if (0 == noninert_out_per_block[B] && 0 == inert_out_per_block[B])
@@ -1564,15 +1565,16 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
     }                                                                           assert(part_st.permutation.end() == begin);
     /* only block 0 has a sequence number and non-bottom states:             */ assert(part_tr.B_to_C.end() == B_to_C_begin);
     // TODO: do this for the other blocks as well, since those can have non-bottom states as well
-    for (size_t b = 0; b < nonbottom_states_per_block.size(); ++b)
+    for (size_t B = 0; B < states_per_block.size(); ++B)
     {
         /* Since any block can have non-bottom states, assign a sequence number and
          set bottom_begin and nonbottom marker */
-        if (nonbottom_states_per_block[b] > 0)
+        if (nonbottom_states_per_block[B] > 0)
         {
-            blocks[b]->assign_seqnr();
-            blocks[b]->set_bottom_begin(blocks[b]->begin() + nonbottom_states_per_block[b]);
-            blocks[b]->set_marked_nonbottom_begin(blocks[b]->bottom_begin());
+            blocks[B]->assign_seqnr();
+            mCRL2log(log::verbose) << "Block no: " << B << " seq_number: " << blocks[B]->seqnr() << std::endl;
+            blocks[B]->set_bottom_begin(blocks[B]->begin() + nonbottom_states_per_block[B]);
+            blocks[B]->set_marked_nonbottom_begin(blocks[B]->bottom_begin());
         }
     }
 
@@ -1585,8 +1587,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                              noninert_in_per_state[s] + inert_in_per_state[s]);
         part_st.state_info[s].set_inert_pred_begin(part_st.state_info[s].
                                       pred_begin() + noninert_in_per_state[s]);
-        // part_st.state_info[s+1].set_pred_begin(part_st.state_info[s].
-        //                                                         pred_end());
+//         part_st.state_info[s+1].set_pred_begin(part_st.state_info[s].
+//                                                                 pred_end());
 
         succ_iter_t succ_iter = part_st.state_info[s].succ_begin();
         succ_iter_t succ_end = succ_iter +
@@ -1622,7 +1624,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
             {                                                                   // The following assertion is incomplete; only the second
                 // bottom state:                                                // assertion (after the assignment) makes sure that not too
                                                                                 // many states become part of this slice.
-                                                                                assert(0 != states_per_block[0]);
+                                                                                assert(0 != states_per_block[block]);
                 --states_per_block[block];
                 part_st.state_info[s].pos = blocks[block]->begin() +
                                                            states_per_block[block]; assert(part_st.state_info[s].pos >= blocks[0]->bottom_begin());
@@ -1675,6 +1677,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
             }
             /* noninert transition from t.from() to extra_state              */ assert(0 != noninert_in_per_state[extra_state]);
             --noninert_in_per_state[extra_state];
+            pred_iter_t bfr = part_st.state_info[extra_state].noninert_pred_begin();
             pred_iter_t const t_pred =
                         part_st.state_info[extra_state].noninert_pred_begin() +
                                             noninert_in_per_state[extra_state]; assert(0 != noninert_out_per_state[t.from()]);
@@ -1683,8 +1686,9 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                                               noninert_out_per_state[t.from()]; assert(0 != noninert_out_per_block[0]);
             std::vector<size_t> label = aut.state_label(t.from());
             state_type block = state_block_map[label];
+            --noninert_out_per_block[block];
             B_to_C_iter_t const t_B_to_C = blocks[block]->inert_begin() -
-                                                   noninert_out_per_block[block]--;
+                                                   noninert_out_per_block[block];
 
             t_pred->source = &part_st.state_info[t.from()];
             t_pred->succ = t_succ;
@@ -1692,6 +1696,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
             t_succ->B_to_C = t_B_to_C;
             // t_B_to_C->B_to_C_slice = (already initialised);
             t_B_to_C->pred = t_pred;
+            assert(t_B_to_C->pred->succ->B_to_C == t_B_to_C);
+            assert(t_B_to_C->pred->source != nullptr);
         }
         else // Other transitions (assumption was that from and to are in the same block)
         {
@@ -1710,7 +1716,7 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                 --inert_out_per_state[t.from()];
                 succ_iter_t const t_succ =
                                 part_st.state_info[t.from()].inert_succ_begin() +
-                                                    inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[0]);
+                                                    inert_out_per_state[t.from()]; assert(0 != inert_out_per_block[block_from]);
                 --inert_out_per_block[block_to];
                 B_to_C_iter_t const t_B_to_C = blocks[block_to]->inert_begin() +
                                                             inert_out_per_block[block_to];
@@ -1721,6 +1727,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                 t_succ->B_to_C = t_B_to_C;
                 // t_B_to_C->B_to_C_slice = (already initialised);
                 t_B_to_C->pred = t_pred;
+                assert(t_B_to_C->pred->succ->B_to_C == t_B_to_C);
+                assert(t_B_to_C->pred->source != nullptr);
             }
             else // noninert transition
             {
@@ -1741,6 +1749,8 @@ init_transitions(part_state_t& part_st, part_trans_t& part_tr,
                 t_succ->target = &part_st.state_info[t.to()];
                 t_succ->B_to_C = t_B_to_C;
                 t_B_to_C->pred = t_pred;
+                assert(t_B_to_C->pred->succ->B_to_C == t_B_to_C);
+                assert(t_B_to_C->pred->source != nullptr);
             }
         }
     }

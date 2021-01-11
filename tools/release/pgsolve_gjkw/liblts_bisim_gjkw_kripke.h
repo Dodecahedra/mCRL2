@@ -1760,7 +1760,7 @@ class bisim_partitioner_gjkw_kripke
         mCRL2log(log::verbose) << "Now creating initial partition..." << std::endl;
         create_initial_partition_gjkw_kripke(branching, preserve_divergence);
         mCRL2log(log::verbose) << "Now refining until it becomes stable..." << std::endl;
-        refine_partition_until_it_becomes_stable_gjkw_kripke(); // <-- Crashes in here
+        refine_partition_until_it_becomes_stable_gjkw_kripke();
         mCRL2log(log::verbose) << "Exiting partitioner..." << std::endl;
     }
     ~bisim_partitioner_gjkw_kripke()
