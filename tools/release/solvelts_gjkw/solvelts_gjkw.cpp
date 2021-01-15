@@ -18,6 +18,7 @@
 #include "utilities.h"
 #include "mcrl2/lts/lts_algorithm.h"
 #include "scc.h"
+#include <unordered_map>
 
 #include <boost/graph/strong_components.hpp>
 #include <boost/graph/graph_traits.hpp>
@@ -135,6 +136,8 @@ class pg_convert
       vertex_state_map[*i] = state;
     }
     m_lts.set_initial_state(0);
+    // Map to store the action label -> size_t
+    std::unordered_map<std::string, size_t> label_map;
     // Loop over all edges in the graph and add transitions to our lts
     boost::graph_traits<parity_game_t>::edge_iterator e, m;
     for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
@@ -145,8 +148,19 @@ class pg_convert
       size_t priority = m_pg[s].prio;
       std::stringstream string_label;
       string_label << player << "," << priority;
-      size_t label = m_lts.add_action(action_label_string(string_label.str()));
-      m_lts.add_transition(transition(s, label, t));
+      size_t label_no;
+      if(label_map.count(string_label.str()) == 0)
+      { // Label does not yet exist
+        label_no = m_lts.add_action(action_label_string(string_label.str()));
+        label_map.insert(std::pair<std::string,size_t>(string_label.str(), label_no));
+      }
+      else
+      {
+        std::unordered_map<std::string,size_t>::const_iterator label =
+                                              label_map.find(string_label.str());
+        label_no = label->second;
+      }
+      m_lts.add_transition(transition(s, label_no, t));
     }
   }
 
@@ -182,9 +196,7 @@ class pg_convert
     }
   }
 
-  std::vector<size_t> get_labels(std::string str) 
-  /* TODO: Update function, the action labels returned should be of the form 
-           {player, priority} */
+  std::vector<size_t> get_labels(std::string str)
   {
     std::vector<size_t> labels;
     size_t i = str.find(",");
@@ -197,18 +209,22 @@ class pg_convert
     g >> pr;
     labels.push_back(pl);
     labels.push_back(pr);
+    return labels;
   }
 
   void run(std::string file)
   {
-    // reduce_pg_scc(file); // TODO: Check if this is done in bisim_partitioner
+    reduce_pg_scc(file); // TODO: Check if this is done in bisim_partitioner
     convert_pg_to_lts(); // We convert the parity game to an lts
-    m_lts.save(file);
     // Call algorithm on m_lts.
     mCRL2log(verbose) << "Calling lts, with " << m_lts.num_states() << " states and " << m_lts.num_transitions() << " transitions." << std::endl;
-    lts::detail::bisim_partitioner<lts_aut_t>(m_lts, true, true); // We run the GJKW algorithm
+    lts::detail::bisim_partitioner_gjkw<lts_aut_t> part(m_lts, true, true); // We run the GJKW algorithm
+    part.replace_transition_system(true, true);
     mCRL2log(verbose) << "Replacing LTS!" << std::endl;
     convert_lts_to_pg();
+    std::ofstream m_ofstream;
+    std::ostream& os = open_output(file, m_ofstream);
+    print_pgsolver(m_pg, os);
     mCRL2log(verbose) << "Printed file" << std::endl;
   }
 };
