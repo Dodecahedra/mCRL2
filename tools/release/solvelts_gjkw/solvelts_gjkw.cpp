@@ -6,9 +6,10 @@
 // (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
-/// \file pgsolve_gjkw.cpp
-/// Reads a parity game from input and reduces it using the Divergence-preserving
-/// branching bisimulation equivalence using the O(m log m) algorithm
+/// \file solvelts_gjkw.cpp
+/// Reads a parity game from input and converts it to an LTS and then
+/// reduces it using Divergence-preserving branching bisimulation
+/// equivalence with the O(m log m) algorithm
 /// [Groote/Jansen/Keiren/Wijs 2017]
 
 #include "mcrl2/lts/lts_fsm.h"
@@ -17,15 +18,14 @@
 #include "pgsolver_io.h"
 #include "utilities.h"
 #include "mcrl2/lts/lts_algorithm.h"
-#include "scc.h"
 #include <unordered_map>
 
 #include <boost/graph/strong_components.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
-using namespace mcrl2::lts; // For reduce() function.
-using namespace mcrl2::log; // Logging.
+using namespace mcrl2::lts;
+using namespace mcrl2::log;
 
 namespace mcrl2 {
 
@@ -39,16 +39,11 @@ class pg_convert
   lts::lts_aut_t m_lts;
 
   public:
-  pg_convert(parity_game_t pg)
+  explicit pg_convert(parity_game_t const& pg)
       : m_pg(pg)
   {}
 
-  parity_game_t get_parity_game()
-  {
-    return m_pg;
-  }
-
-  void reduce_pg_scc(std::string file)
+  void reduce_pg_scc()
   /* Reduce Parity Game graph to remove Strongly Connected Components. */
   {
     typedef typename boost::graph_traits<parity_game_t>::vertices_size_type vertex_size_t;
@@ -126,26 +121,26 @@ class pg_convert
   {
     // LTS in which we save the Kripke structure
     std::map<size_t, size_t> vertex_state_map;
+    std::map<size_t, size_t> svertex_state_map;
+    std::unordered_map<std::string, size_t> label_map;
 
     boost::graph_traits<parity_game_t >::vertex_iterator i, n;
     // We loop over vertices and add new states to the lts
+    size_t bot = m_lts.add_action(action_label_string("bot"));
+    label_map.insert(std::pair<std::string,size_t>("bot", bot));
     for(boost::tie(i, n) = vertices(m_pg); i != n; ++i)
     {
       size_t state = m_lts.add_state();
+      size_t shadow_state = m_lts.add_state();
       // Add the (vertex,state) pair to map
       vertex_state_map[*i] = state;
-    }
-    m_lts.set_initial_state(0);
-    // Map to store the action label -> size_t
-    std::unordered_map<std::string, size_t> label_map;
-    // Loop over all edges in the graph and add transitions to our lts
-    boost::graph_traits<parity_game_t>::edge_iterator e, m;
-    for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
-    {
-      size_t s = vertex_state_map[source(*e, m_pg)];
-      size_t t = vertex_state_map[target(*e, m_pg)];
-      size_t player = m_pg[s].player;
-      size_t priority = m_pg[s].prio;
+      svertex_state_map[*i] = shadow_state;
+      // Add bottom transitions
+      m_lts.add_transition(transition(state, bot, shadow_state));
+      // Add label transition
+      size_t player = m_pg[*i].player;
+      size_t priority = m_pg[*i].prio;
+      mCRL2log(verbose) << "player: " << player << " prio " << priority << std::endl;
       std::stringstream string_label;
       string_label << player << "," << priority;
       size_t label_no;
@@ -156,11 +151,38 @@ class pg_convert
       }
       else
       {
-        std::unordered_map<std::string,size_t>::const_iterator label =
-                                              label_map.find(string_label.str());
+        auto label = label_map.find(string_label.str());
         label_no = label->second;
       }
-      m_lts.add_transition(transition(s, label_no, t));
+      m_lts.add_transition(transition(shadow_state, label_no, state));
+      mCRL2log(verbose) << "Added state: " << state << ", " << *i << std::endl;
+    }
+    m_lts.set_initial_state(0);
+    size_t tau = m_lts.add_action(action_label_string("tau"));
+    m_lts.apply_hidden_label_map(tau);
+    // Loop over all edges in the graph and add transitions to our lts
+    boost::graph_traits<parity_game_t>::edge_iterator e, m;
+    for(boost::tie(e,m) = edges(m_pg); e != m; ++e)
+    {
+      size_t src = source(*e, m_pg);
+      size_t trgt = target(*e, m_pg);
+      size_t s = vertex_state_map[src];
+      size_t t = vertex_state_map[trgt];
+      if(m_pg[src].player == m_pg[trgt].player && m_pg[src].prio == m_pg[trgt].prio)
+      { // Add a tau transition
+        m_lts.add_transition(transition(s, tau, t));
+      }
+      else
+      { // Add L(t) transition
+        size_t player = m_pg[trgt].player;
+        size_t priority = m_pg[trgt].prio;
+        std::stringstream string_label;
+        string_label << player << "," << priority;
+        auto label = label_map.find(string_label.str());
+        size_t label_no = label->second;
+        m_lts.add_transition(transition(s, label_no, t));
+      }
+
     }
   }
 
@@ -172,34 +194,62 @@ class pg_convert
     m_pg.clear();
     std::map<size_t, size_t> state_vertex_map;
 
-    // Loop over states and add vertices to graph
-    for(size_t i=0; i!=m_lts.num_states(); ++i )
-    {
-      size_t v = boost::add_vertex(m_pg);
-      // Set properties of the new state
-      // Safe the mapping from state to vertex for later when adding edges.
-      state_vertex_map[i] = v;
+    for(const transition& tr: m_lts.get_transitions())
+    { /* We loop over all transitions and add vertices for the source and target
+         states if they did not yet exist. If transition contains a label, we add
+         the label information to the target state.*/
+      if(state_vertex_map.count(tr.from()) == 0)
+      {
+        size_t v = boost::add_vertex(m_pg);
+        state_vertex_map[tr.from()] = v;
+        m_pg[v].unused = true;
+      }
+      if(state_vertex_map.count(tr.to()) == 0)
+      {
+        size_t u = boost::add_vertex(m_pg);
+        state_vertex_map[tr.to()] = u;
+        m_pg[u].unused = true;
+      }
+      boost::add_edge(state_vertex_map[tr.from()], state_vertex_map[tr.to()], m_pg);
+      action_label_string string_label = m_lts.action_label(tr.label());
+      mCRL2log(verbose) << "Label: " << string_label << std::endl;
+      if(!(string_label == "tau" || string_label == "bot"))
+      { // Transition with label L(t)
+        size_t u = state_vertex_map[tr.to()];
+        std::vector<size_t> labels = get_labels(string_label); // We get the labels from the action string
+        if(m_pg[u].unused)
+        { // If vertex was not yet initialised
+          m_pg[u].player = labels[0] == 0 ? even : odd;
+          m_pg[u].prio = labels[1];
+          m_pg[u].unused = false; // Mark vertex as initialised
+          mCRL2log(verbose) << "Set vertex: " << u << " to: " << labels[0] <<
+                                                  " " << labels[1] << std::endl;
+        }
+      }
     }
 
-    for(const transition& tr: m_lts.get_transitions())
-    {
-      size_t s = state_vertex_map[tr.from()];
-      size_t t = state_vertex_map[tr.to()];
-      action_label_string string_label = m_lts.action_label(tr.label());
-      std::vector<size_t> labels = get_labels(string_label); // We get the labels from the string
-      if(m_pg[s].player == NULL) // If not yet set
+    size_t i = 0;
+    while(i < boost::num_vertices(m_pg))
+    { /* We loop over all the vertices and remove those which have not been
+         initialised. */
+      if(m_pg[i].unused)
       {
-        m_pg[s].player = labels[0] == 0 ? even : odd;
-        m_pg[s].prio = labels[1];
+        boost::clear_vertex(i, m_pg);
+        boost::remove_vertex(i, m_pg);
       }
-      boost::add_edge(s, t, m_pg);
+      else
+      {
+        i++;
+      }
     }
   }
 
   std::vector<size_t> get_labels(std::string str)
+  /* Auxiliary function to get a vector with the {player,priority} from the action
+     string. */
   {
     std::vector<size_t> labels;
-    size_t i = str.find(",");
+    size_t i = str.find(',');
     std::string player = str.substr(0, i);
     std::string priority = str.substr(i+1, str.length()-i-1);
     std::stringstream f(player);
@@ -212,24 +262,29 @@ class pg_convert
     return labels;
   }
 
-  void run(std::string file)
+  void run(std::string file, std::string infile)
   {
-    reduce_pg_scc(file); // TODO: Check if this is done in bisim_partitioner
-    convert_pg_to_lts(); // We convert the parity game to an lts
-    // Call algorithm on m_lts.
-    mCRL2log(verbose) << "Calling lts, with " << m_lts.num_states() << " states and " << m_lts.num_transitions() << " transitions." << std::endl;
-    lts::detail::bisim_partitioner_gjkw<lts_aut_t> part(m_lts, true, true); // We run the GJKW algorithm
+    mCRL2log(verbose) << "Filename: " << infile << std::endl;
+    mcrl2::utilities::execution_timer timer(infile,
+               "/home/koen/Documents/TUe/Master/Quartile2/2IMF00Seminar/mCRL2/timing");
+    timer.start("execution");
+    reduce_pg_scc(); // Make sure we remove any cycles in the graph.
+    convert_pg_to_lts(); // Convert parity game to LTS.
+    /* Call GJKW algorithm and start timers for reducing and execution. */
+    timer.start("reducing");
+    lts::detail::bisim_partitioner_gjkw<lts_aut_t> part(m_lts, true, true);
     part.replace_transition_system(true, true);
-    mCRL2log(verbose) << "Replacing LTS!" << std::endl;
-    convert_lts_to_pg();
+    timer.finish("reducing");
+    convert_lts_to_pg(); // Convert LTS to Parity Game.
     std::ofstream m_ofstream;
     std::ostream& os = open_output(file, m_ofstream);
     print_pgsolver(m_pg, os);
-    mCRL2log(verbose) << "Printed file" << std::endl;
+    timer.finish("execution");
+    timer.report();
   }
 };
 
-} // End mcrl2
+}
 
 using mcrl2::utilities::tools::input_output_tool;
 
@@ -237,7 +292,6 @@ class solvelts_tool: public input_output_tool
 {
   private:
   std::ifstream m_ifstream;
-  std::ofstream m_ofstream;
 
   protected:
   typedef input_output_tool super;
@@ -255,14 +309,13 @@ class solvelts_tool: public input_output_tool
 
   bool run()
   {
-    std::istream& is = open_input(input_filename(), m_ifstream);
-    // Main program flow
+    std::string infile = input_filename();
+    std::istream& is = open_input(infile, m_ifstream);
     parity_game_t pg;
-    mCRL2log(verbose) << "Loading PG from input file..." << std::endl;
     parse_pgsolver(pg, is, timer());
     mcrl2::pg_convert c = mcrl2::pg_convert(pg);
-    c.run(output_filename());
-    mCRL2log(verbose) << "Terminating" << std::endl;
+    c.run(output_filename(), infile);
+    mCRL2log(verbose) << "Terminating..." << std::endl;
     return true;
   }
 };
